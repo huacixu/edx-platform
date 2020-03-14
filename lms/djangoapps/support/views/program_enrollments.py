@@ -18,6 +18,7 @@ from lms.djangoapps.program_enrollments.api import (
     link_program_enrollments
 )
 from lms.djangoapps.support.decorators import require_support_permission
+from lms.djangoapps.support.serializers import ProgramEnrollmentSerializer
 from lms.djangoapps.verify_student.services import IDVerificationService
 from third_party_auth.models import SAMLProviderConfig
 
@@ -246,59 +247,5 @@ class ProgramEnrollmentsInspectorView(View):
             user=user,
             external_user_key=external_user_key
         ).prefetch_related('program_course_enrollments')
-
-        enrollments_by_program_uuid = {}
-        for program_enrollment in program_enrollments:
-            serialized_program_enrollment = self._serialize_program_enrollment(program_enrollment)
-            enrollment_item = {
-                'program_enrollment': serialized_program_enrollment
-            }
-            program_course_enrollments = program_enrollment.program_course_enrollments.all()
-            for program_course_enrollment in program_course_enrollments.select_related(
-                'course_enrollment'
-            ):
-                serialized_program_course_enrollment = self._serialize_program_course_enrollment(
-                    program_course_enrollment
-                )
-                enrollment_item.setdefault('program_course_enrollments', []).append(
-                    serialized_program_course_enrollment
-                )
-            enrollments_by_program_uuid[program_enrollment.program_uuid] = enrollment_item
-
-        return list(enrollments_by_program_uuid.values())
-
-    def _serialize_program_enrollment(self, program_enrollment):
-        if not program_enrollment:
-            return {}
-
-        return {
-            'created': program_enrollment.created.strftime(DATETIME_FORMAT),
-            'modified': program_enrollment.modified.strftime(DATETIME_FORMAT),
-            'program_uuid': str(program_enrollment.program_uuid),
-            'external_user_key': program_enrollment.external_user_key,
-            'status': program_enrollment.status
-        }
-
-    def _serialize_program_course_enrollment(self, program_course_enrollment):
-        """
-        Return a dictionary of ProgramCourseEnrollment serialized
-        """
-        if not program_course_enrollment:
-            return {}
-
-        result = {
-            'created': program_course_enrollment.created.strftime(DATETIME_FORMAT),
-            'modified': program_course_enrollment.modified.strftime(DATETIME_FORMAT),
-            'status': program_course_enrollment.status,
-            'course_key': str(program_course_enrollment.course_key),
-        }
-
-        course_enrollment = program_course_enrollment.course_enrollment
-        if course_enrollment:
-            result['course_enrollment'] = {
-                'course_id': str(course_enrollment.course_id),
-                'is_active': course_enrollment.is_active,
-                'mode': course_enrollment.mode,
-            }
-
-        return result
+        serialized = ProgramEnrollmentSerializer(program_enrollments, many=True)
+        return serialized.data

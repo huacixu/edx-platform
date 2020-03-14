@@ -25,6 +25,7 @@ from common.test.utils import disable_signal
 from course_modes.models import CourseMode
 from course_modes.tests.factories import CourseModeFactory
 from lms.djangoapps.program_enrollments.tests.factories import ProgramCourseEnrollmentFactory, ProgramEnrollmentFactory
+from lms.djangoapps.support.serializers import ProgramEnrollmentSerializer
 from lms.djangoapps.verify_student.models import VerificationDeadline
 from lms.djangoapps.verify_student.services import IDVerificationService
 from lms.djangoapps.verify_student.tests.factories import SSOVerificationFactory
@@ -621,27 +622,14 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
         If the edx user is provided, it will try to SSO the user with the enrollments
         Return the expected info object that should be created based on the model setup
         """
-        expected_enrollments = []
+        program_enrollments = []
         for program_uuid in program_uuids:
-            expected_enrollment = {}
-            expected_course_enrollment = {}
             course_enrollment = None
             program_enrollment = ProgramEnrollmentFactory.create(
                 external_user_key=external_user_key,
                 program_uuid=program_uuid,
                 user=edx_user
             )
-            expected_enrollment['program_enrollment'] = {
-                'created': self._serialize_datetime(
-                    program_enrollment.created
-                ),
-                'modified': self._serialize_datetime(
-                    program_enrollment.modified
-                ),
-                'program_uuid': program_enrollment.program_uuid,
-                'external_user_key': external_user_key,
-                'status': program_enrollment.status
-            }
 
             for course_id in course_ids:
                 if edx_user:
@@ -651,11 +639,6 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
                         mode=CourseMode.MASTERS,
                         is_active=True
                     )
-                    expected_course_enrollment = {
-                        'course_id': str(course_enrollment.course_id),
-                        'is_active': course_enrollment.is_active,
-                        'mode': course_enrollment.mode,
-                    }
 
                 program_course_enrollment = ProgramCourseEnrollmentFactory.create(
                     program_enrollment=program_enrollment,
@@ -663,26 +646,11 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
                     course_enrollment=course_enrollment,
                     status='active',
                 )
-                expected_program_course_enrollment = {
-                    'created': self._serialize_datetime(
-                        program_course_enrollment.created
-                    ),
-                    'modified': self._serialize_datetime(
-                        program_course_enrollment.modified
-                    ),
-                    'status': program_course_enrollment.status,
-                    'course_key': str(program_course_enrollment.course_key),
-                }
-                if expected_course_enrollment:
-                    expected_program_course_enrollment['course_enrollment'] = expected_course_enrollment
 
-                expected_enrollment.setdefault('program_course_enrollments', []).append(
-                    expected_program_course_enrollment
-                )
+            program_enrollments.append(program_enrollment)
 
-            expected_enrollments.append(expected_enrollment)
-
-        return expected_enrollments
+        serialized = ProgramEnrollmentSerializer(program_enrollments, many=True)
+        return serialized.data
 
     def _construct_id_verification(self, user):
         """
