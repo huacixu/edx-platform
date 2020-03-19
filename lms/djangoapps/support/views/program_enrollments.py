@@ -15,10 +15,19 @@ from social_django.models import UserSocialAuth
 from edxmako.shortcuts import render_to_response
 from lms.djangoapps.program_enrollments.api import (
     fetch_program_enrollments_by_student,
+    get_users_by_external_keys_and_org_key,
     link_program_enrollments
 )
+from lms.djangoapps.program_enrollments.exceptions import (
+    BadOrganizationShortNameException,
+    ProviderConfigurationException,
+    ProviderDoesNotExistException
+)
 from lms.djangoapps.support.decorators import require_support_permission
-from lms.djangoapps.support.serializers import ProgramEnrollmentSerializer
+from lms.djangoapps.support.serializers import (
+    ProgramEnrollmentSerializer,
+    serialize_user_info
+)
 from lms.djangoapps.verify_student.services import IDVerificationService
 from third_party_auth.models import SAMLProviderConfig
 
@@ -141,14 +150,16 @@ class ProgramEnrollmentsInspectorView(View):
             )
             if not learner_program_enrollments:
                 errors.append(
-                    'Could not find any information about {} in database'.format(
-                        external_user_key
+                    'No user found for external key {} for instituation {}'.format(
+                        external_user_key, org_key
                     )
                 )
         else:
             errors.append(
-                'You must provide either the edX username or email, or the '
-                'Learner Account Provider and External Key pair to do search!'
+                "To perform a search, you must provide either the student's "
+                "(a) edX username, "
+                "(b) email address associated with their edX account, or "
+                "(c) Identity-providing institution and external key!"
             )
 
         return render_to_response(
@@ -185,7 +196,7 @@ class ProgramEnrollmentsInspectorView(View):
                 user_social_auth = UserSocialAuth.objects.get(user=user)
             except UserSocialAuth.DoesNotExist:
                 pass
-            user_info = self._serialize_user_info(user, user_social_auth)
+            user_info = serialize_user_info(user, user_social_auth)
             enrollments = self._get_enrollments(user=user)
             result = {'user': user_info}
             if enrollments:
@@ -196,46 +207,40 @@ class ProgramEnrollmentsInspectorView(View):
         except User.DoesNotExist:
             return {}, 'Could not find edx account with {}'.format(username_or_email)
 
-    def _get_external_user_info(self, external_user_key, idp_slug):
+    def _get_external_user_info(self, external_user_key, org_key):
         """
-        Provided the external_user_key and idp_slug, return edx account info
+        Provided the external_user_key and org_key, return edx account info
         and program_enrollments_info if any. If we cannot identify the data,
         return empty object.
         """
-        sso_uid = ':'.join([idp_slug, external_user_key])
-        user_social_auths = UserSocialAuth.objects.filter(
-            uid=sso_uid
-        ).select_related('user').order_by('-id')
+        found_user = None
         result = {}
+        try:
+            users_by_key = get_users_by_external_keys_and_org_key(
+                [external_user_key],
+                org_key
+            )
+            found_user = users_by_key.get(external_user_key)
+        except (
+            BadOrganizationShortNameException,
+            ProviderConfigurationException,
+            ProviderDoesNotExistException
+        ):
+            # We cannot identify edX user from external_user_key and org_key pair
+            pass
 
-        if user_social_auths:
-            user_social_auth = user_social_auths.first()
-            user = user_social_auth.user
-            user_info = self._serialize_user_info(user, user_social_auth)
+        if found_user:
+            try:
+                user_social_auth = UserSocialAuth.objects.get(user=found_user)
+            except UserSocialAuth.DoesNotExist:
+                user_social_auth = None
+            user_info = serialize_user_info(found_user, user_social_auth)
             result['user'] = user_info
-            result['id_verification'] = IDVerificationService.user_status(user)
+            result['id_verification'] = IDVerificationService.user_status(found_user)
         enrollments = self._get_enrollments(external_user_key=external_user_key)
         if enrollments:
             result['enrollments'] = enrollments
         return result
-
-    def _serialize_user_info(self, user, user_social_auth=None):
-        """
-        Helper method to serialize the user_info_object based on
-        passed in django models
-        """
-        user_info = {
-            'username': user.username,
-            'email': user.email,
-        }
-        if user_social_auth:
-            _, external_key = user_social_auth.uid.split(':', 1)
-            user_info['external_user_key'] = external_key
-            user_info['SSO'] = {
-                'uid': user_social_auth.uid,
-                'provider': user_social_auth.provider
-            }
-        return user_info
 
     def _get_enrollments(self, user=None, external_user_key=None):
         """

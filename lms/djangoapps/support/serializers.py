@@ -56,3 +56,22 @@ class ProgramEnrollmentSerializer(serializers.Serializer):
 
     class Meta(object):
         model = ProgramEnrollment
+
+
+def serialize_user_info(user, user_social_auth=None):
+    """
+    Helper method to serialize resulting in user_info_object
+    based on passed in django models
+    """
+    user_info = {
+        'username': user.username,
+        'email': user.email,
+    }
+    if user_social_auth:
+        _, external_key = user_social_auth.uid.split(':', 1)
+        user_info['external_user_key'] = external_key
+        user_info['sso'] = {
+            'uid': user_social_auth.uid,
+            'provider': user_social_auth.provider
+        }
+    return user_info

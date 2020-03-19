@@ -574,6 +574,7 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
             SAMLProviderConfigFactory(
                 organization=lms_org,
                 slug=org_key,
+                backend_name=org_key,
                 enabled=True,
             )
         self.no_saml_org_key = 'no_saml_org'
@@ -610,7 +611,7 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
                 provider=org_key
             )
             user_info['external_user_key'] = external_user_key
-            user_info['SSO'] = {
+            user_info['sso'] = {
                 'uid': user_social_auth.uid,
                 'provider': user_social_auth.provider
             }
@@ -825,8 +826,10 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
         })
 
         expected_errors = [
-            'You must provide either the edX username or email, or the '
-            'Learner Account Provider and External Key pair to do search!'
+            "To perform a search, you must provide either the student's "
+            "(a) edX username, "
+            "(b) email address associated with their edX account, or "
+            "(c) Identity-providing institution and external key!"
         ]
 
         render_call_dict = mocked_render.call_args[0][1]
@@ -853,13 +856,16 @@ class ProgramEnrollmentsInspectorViewTests(SupportViewTestCase):
 
     @patch_render
     def test_search_external_user_not_in_system(self, mocked_render):
+        external_user_key = 'not_in_system'
         self.client.get(self.url, data={
-            'external_user_key': 'not_in_system',
+            'external_user_key': external_user_key,
             'IdPSelect': self.org_key_list[0],
         })
 
         expected_errors = [
-            'Could not find any information about not_in_system in database'
+            'No user found for external key {} for instituation {}'.format(
+                external_user_key, self.org_key_list[0]
+            )
         ]
         render_call_dict = mocked_render.call_args[0][1]
         assert expected_errors == render_call_dict['errors']
